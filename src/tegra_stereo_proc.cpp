@@ -27,7 +27,8 @@ void TegraStereoProc::onInit() {
   private_nh.param("P2", p2_, 100);
 
   private_nh.param("queue_size", queue_size_, 100);
-  
+  private_nh.param<std::string>("intrinsic_file", intrinsic_file_, "std::string::");
+
   it_ = boost::make_shared<image_transport::ImageTransport>(nh);
   
   left_raw_sub_.subscribe(*it_.get(), "/stereo/cam0/image_raw", 1);

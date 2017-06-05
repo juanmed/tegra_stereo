@@ -71,6 +71,7 @@ private:
   int p2_;
 
   int queue_size_;
+  std::string intrinsic_file_;
   
   void publishRectifiedImages(const cv::Mat& left_rect, 
 			      const cv::Mat& right_rect, 
