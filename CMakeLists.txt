@@ -56,3 +56,10 @@ set(LIBSGM
 cuda_add_library(tegra_stereo_proc src/tegra_stereo_proc.cpp ${LIBSGM})
 target_link_libraries(tegra_stereo_proc ${CUDA_LIBRARIES} ${catkin_LIBRARIES} ${OpenCV_LIBRARIES} ${YAML_CPP_LIBRARIES})
 
+################################################
+#Add all files in subdirectories of the project in
+# a dummy_target so qtcreator have access to all files
+FILE(GLOB_RECURSE extra_files
+    ${CMAKE_SOURCE_DIR}/*)
+add_custom_target(dummy_${PROJECT_NAME} SOURCES ${extra_files})
+################################################
