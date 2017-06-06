@@ -25,7 +25,13 @@ else ()
   message(FATAL_ERROR "The compiler ${CMAKE_CXX_COMPILER} has no C++11 support. Please use a different C++ compiler.")
 endif ()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -march=armv8-a")
+# check for arm processor
+exec_program(uname ARGS -p OUTPUT_VARIABLE CMAKE_SYSTEM_NAME2)
+if ( CMAKE_SYSTEM_NAME2 MATCHES "aarch64" ) # i.e. Jetson TX1
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -march=armv8-a")
+else() # Ubuntu Desktop
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -march=native")
+endif()
 
 catkin_package(
   INCLUDE_DIRS include

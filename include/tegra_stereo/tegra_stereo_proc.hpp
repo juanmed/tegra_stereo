@@ -18,6 +18,7 @@
 #include <stereo_msgs/DisparityImage.h>
 
 #include <image_geometry/stereo_camera_model.h>
+#include <camera_calibration_parsers/parse.h>
 #include <opencv2/calib3d/calib3d.hpp>
 #include <cv_bridge/cv_bridge.h>
 
@@ -31,7 +32,7 @@ using message_filters::sync_policies::ExactTime;
 class TegraStereoProc : public nodelet::Nodelet {
   using SubscriberFilter = image_transport::SubscriberFilter;
   using InfoSubscriber = message_filters::Subscriber<sensor_msgs::CameraInfo>;
-  using ExactPolicy = ExactTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo, sensor_msgs::CameraInfo>;
+  using ExactPolicy = ExactTime<sensor_msgs::Image, sensor_msgs::Image>;
   using ExactSync = message_filters::Synchronizer<ExactPolicy>;
 
 public:
@@ -40,9 +41,7 @@ public:
 
   virtual void onInit();
   void imageCallback(const sensor_msgs::ImageConstPtr& l_image_msg,
-      const sensor_msgs::ImageConstPtr& r_image_msg,
-      const sensor_msgs::CameraInfoConstPtr& l_info_msg,
-      const sensor_msgs::CameraInfoConstPtr& r_info_msg);
+      const sensor_msgs::ImageConstPtr& r_image_msg);
 
 private:
   std::once_flag calibration_initialized_flag;
@@ -61,6 +60,9 @@ private:
   
   image_transport::Publisher raw_disparity_pub_;
   
+  //
+  sensor_msgs::CameraInfoPtr mCameraInfoLeftPtr;
+  sensor_msgs::CameraInfoPtr mCameraInfoRightPtr;
   // camera models
   image_geometry::PinholeCameraModel left_model_;
   image_geometry::PinholeCameraModel right_model_;
@@ -71,12 +73,11 @@ private:
   int p2_;
 
   int queue_size_;
-  std::string intrinsic_file_;
   
   void publishRectifiedImages(const cv::Mat& left_rect, 
 			      const cv::Mat& right_rect, 
-			      const sensor_msgs::ImageConstPtr &l_image_msg,
-			      const sensor_msgs::ImageConstPtr &r_image_msg);
+                  const sensor_msgs::ImageConstPtr &l_image_msg,
+                  const sensor_msgs::ImageConstPtr &r_image_msg);
   void publishDisparity(const cv::Mat& disparity, const std_msgs::Header& header);
   void publishPointcloud(const cv::Mat& disparity);
   

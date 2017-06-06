@@ -1,0 +1,22 @@
+<launch>
+    <!-- vim: set ft=xml noet : -->
+    <arg name="nodelet_manager_name" value="nodelet_manager" />
+
+        <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager_name)" args="manager" output="screen" launch-prefix="gdb -ex start --args" >
+        </node>
+
+
+        <node
+                pkg="nodelet"
+                type="nodelet"
+                name="tegra_stereo"
+                output="screen"
+                args="load tegra_stereo/tegra_stereo_proc $(arg nodelet_manager_name)" >
+
+            <param name="P1" type="int" value="7" />
+            <param name="P2" type="int" value="100" />
+            <param name="camera_calibration_file_left" type="str" value="$(find tegra_stereo)/cfg/left.yaml" />
+            <param name="camera_calibration_file_right" type="str" value="$(find tegra_stereo)/cfg/right.yaml" />
+
+        </node>
+</launch>
