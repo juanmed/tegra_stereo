@@ -29,6 +29,7 @@ void TegraStereoProc::onInit()
     private_nh.param<int> ("P2", p2_, 100);
 
     private_nh.param<int> ("queue_size", queue_size_, 10u);
+    private_nh.param<bool> ("rectify_images", rectifyImages_, true);
 
     //camera calibration files
     std::string cameraCalibrationFileLeft;
@@ -39,39 +40,66 @@ void TegraStereoProc::onInit()
     if (! (cameraCalibrationFileRight.empty() && cameraCalibrationFileLeft.empty()))
     {
         std::string cameraName;
-        mCameraInfoLeftPtr = boost::make_shared<sensor_msgs::CameraInfo>();
-        mCameraInfoRightPtr = boost::make_shared<sensor_msgs::CameraInfo>();
-        camera_calibration_parsers::readCalibration (cameraCalibrationFileLeft, cameraName, *mCameraInfoLeftPtr);
-        camera_calibration_parsers::readCalibration (cameraCalibrationFileRight, cameraName, *mCameraInfoRightPtr);
+        mCameraInfoLeftPtr_ = boost::make_shared<sensor_msgs::CameraInfo>();
+        mCameraInfoRightPtr_ = boost::make_shared<sensor_msgs::CameraInfo>();
+        NODELET_INFO_STREAM ("Stereo calibration left:" << cameraCalibrationFileLeft);
+        NODELET_INFO_STREAM ("Stereo calibration right:" << cameraCalibrationFileRight);
+        camera_calibration_parsers::readCalibration (cameraCalibrationFileLeft, cameraName, *mCameraInfoLeftPtr_);
+        camera_calibration_parsers::readCalibration (cameraCalibrationFileRight, cameraName, *mCameraInfoRightPtr_);
 
-        left_model_.fromCameraInfo (mCameraInfoLeftPtr);
-        right_model_.fromCameraInfo (mCameraInfoRightPtr);
-        stereo_model_.fromCameraInfo (mCameraInfoLeftPtr, mCameraInfoRightPtr);
+        left_model_.fromCameraInfo (mCameraInfoLeftPtr_);
+        right_model_.fromCameraInfo (mCameraInfoRightPtr_);
+        stereo_model_.fromCameraInfo (mCameraInfoLeftPtr_, mCameraInfoRightPtr_);
         NODELET_INFO ("Stereo calibration initialized from file");
 
     }
+    else
+    {
+        NODELET_INFO ("Stereo calibration files are not specified");
+    }
 
-    it_ = boost::make_shared<image_transport::ImageTransport> (nh);
+    imageTransport_ = boost::make_shared<image_transport::ImageTransport> (nh);
 
-    left_raw_sub_.subscribe (*it_.get(), "/cam0/image_raw", 1);
-    right_raw_sub_.subscribe (*it_.get(), "/cam1/image_raw", 1);
-    left_info_sub_.subscribe (nh, "/stereo/cam0/camera_info", 1);
-    right_info_sub_.subscribe (nh, "/stereo/cam1/camera_info", 1);
+    left_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/left/image_raw", 1);
+    right_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/right/image_raw", 1);
 
-    left_rect_pub_ = it_->advertise ("/stereo/cam0/image_rect", 1);
-    right_rect_pub_ = it_->advertise ("/stereo/cam1/image_rect", 1);
-    raw_disparity_pub_ = it_->advertise ("/stereo/disparity_raw", 1);
+    left_info_sub_.subscribe (nh, "/stereo/left/camera_info", 1);
+    right_info_sub_.subscribe (nh, "/stereo/right/camera_info", 1);
+
+    left_rect_pub_ = imageTransport_->advertise ("/stereo/left/image_rect", 1);
+    right_rect_pub_ = imageTransport_->advertise ("/stereo/right/image_rect", 1);
+    raw_disparity_pub_ = imageTransport_->advertise ("/stereo/disparity_raw", 1);
     pub_disparity_ = nh.advertise<DisparityImage> ("/stereo/disparity", 1);
 
     // Synchronize input topics
-    exact_sync_ = boost::make_shared<ExactSync> (ExactPolicy (10u), left_raw_sub_, right_raw_sub_);
-    exact_sync_->registerCallback (
-        boost::bind (&TegraStereoProc::imageCallback, this, _1, _2));
+    info_exact_sync_ = boost::make_shared<InfoExactSync_t> (InfoExactPolicy_t (10u), left_info_sub_, right_info_sub_);
+    info_exact_sync_->registerCallback (boost::bind (&TegraStereoProc::infoCallback, this, _1, _2));
+
+    image_exact_sync_ = boost::make_shared<ImageExactSync_t> (ImageExactPolicy_t (10u), left_raw_sub_, right_raw_sub_);
+    image_exact_sync_->registerCallback (boost::bind (&TegraStereoProc::imageCallback, this, _1, _2));
 
     // Initialize Semi-Global Matcher
-    init_disparity_method (p1_, p2_);
+    init_disparity_method (static_cast<uint8_t> (p1_), static_cast<uint8_t> (p2_));
     NODELET_INFO ("Init done; P1 %d; P2: %d", p1_, p2_);
 
+}
+
+void TegraStereoProc::infoCallback (
+    const sensor_msgs::CameraInfoConstPtr &l_info_msg,
+    const sensor_msgs::CameraInfoConstPtr &r_info_msg)
+{
+
+    std::call_once (calibration_initialized_flag_, [ &, this] ()
+    {
+
+        left_model_.fromCameraInfo (l_info_msg);
+        right_model_.fromCameraInfo (r_info_msg);
+        stereo_model_.fromCameraInfo (l_info_msg, r_info_msg);
+        //we do not need to listen to this anymore
+        right_info_sub_.unsubscribe();
+        left_info_sub_.unsubscribe();
+        NODELET_INFO ("Stereo calibration initialized from first message");
+    });
 }
 
 void TegraStereoProc::imageCallback (
@@ -79,33 +107,45 @@ void TegraStereoProc::imageCallback (
     const sensor_msgs::ImageConstPtr &r_image_msg)
 {
 
-//    std::call_once (calibration_initialized_flag, [ &, this] ()
-//    {
+    if (!stereo_model_.initialized())
+    {
+        NODELET_INFO ("Stereo calibration NOT initialized yet");
+        return;
+    }
 
-//        left_model_.fromCameraInfo (l_info_msg);
-//        right_model_.fromCameraInfo (r_info_msg);
-//        stereo_model_.fromCameraInfo (l_info_msg, r_info_msg);
-
-//        NODELET_INFO ("Stereo calibration initialized from first message");
-
-//    });
-
+    //Convert to CV format MONO 8bit
     const cv::Mat left_raw = cv_bridge::toCvShare (l_image_msg, sensor_msgs::image_encodings::MONO8)->image;
     const cv::Mat right_raw = cv_bridge::toCvShare (r_image_msg, sensor_msgs::image_encodings::MONO8)->image;
-    cv::Mat left_rect;
-    cv::Mat right_rect;
 
-    left_model_.rectifyImage (left_raw, left_rect, cv::INTER_LINEAR);
-    right_model_.rectifyImage (right_raw, right_rect, cv::INTER_LINEAR);
-
-    // Compute
     float elapsed_time_ms;
-    cv::Mat disparity = compute_disparity_method (left_rect, right_rect, &elapsed_time_ms);
+    cv::Mat disparity;
 
-    NODELET_INFO (" Disparity computation took %f ms", elapsed_time_ms);
+    if (rectifyImages_)
+    {
+        cv::Mat left_rect;
+        cv::Mat right_rect;
 
-    publishRectifiedImages (left_rect, right_rect, l_image_msg, r_image_msg);
+        left_model_.rectifyImage (left_raw, left_rect, cv::INTER_LINEAR);
+        right_model_.rectifyImage (right_raw, right_rect, cv::INTER_LINEAR);
+
+        // Compute
+        disparity = compute_disparity_method (left_rect, right_rect, &elapsed_time_ms);
+        publishRectifiedImages (left_rect, right_rect, l_image_msg, r_image_msg);
+    }
+    else
+    {
+        disparity = compute_disparity_method (left_raw, right_raw, &elapsed_time_ms);
+    }
+    elapsed_time_ms_acc_ += elapsed_time_ms;
+    if(l_image_msg->header.seq %100 == 0 && (elapsed_time_ms_acc_ - elapsed_time_ms) > 1)
+    {
+        elapsed_time_ms_acc_ = 100000/elapsed_time_ms_acc_;
+        NODELET_INFO ("Disparity computation at %f [fps] (100 samples avg);", static_cast<double>(elapsed_time_ms_acc_));
+        elapsed_time_ms_acc_ = 0.0;
+    }
+
     publishDisparity (disparity, l_image_msg->header);
+
 
 }
 

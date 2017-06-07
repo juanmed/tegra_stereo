@@ -1,8 +1,10 @@
 <launch>
     <!-- vim: set ft=xml noet : -->
     <arg name="nodelet_manager_name" value="nodelet_manager" />
+	<arg name="P1" default="20" />
+	<arg name="P2" default="100" />
 
-        <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager_name)" args="manager" output="screen" launch-prefix="gdb -ex start --args" >
+        <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager_name)" args="manager" output="screen" launch-prefix2="gdb -ex start --args" >
         </node>
 
 
@@ -13,10 +15,17 @@
                 output="screen"
                 args="load tegra_stereo/tegra_stereo_proc $(arg nodelet_manager_name)" >
 
-            <param name="P1" type="int" value="7" />
-            <param name="P2" type="int" value="100" />
-            <param name="camera_calibration_file_left" type="str" value="$(find tegra_stereo)/cfg/left.yaml" />
-            <param name="camera_calibration_file_right" type="str" value="$(find tegra_stereo)/cfg/right.yaml" />
+            <param name="P1" type="int" value="$(arg P1)" />
+            <param name="P2" type="int" value="$(arg P2)" />
+            <param name="rectify_images" type="bool" value="false" />
+            
+            <param name="camera_calibration_file_left_" type="str" value="$(find tegra_stereo)/cfg/left.yaml" />
+            <param name="camera_calibration_file_right_" type="str" value="$(find tegra_stereo)/cfg/right.yaml" />
+			
+			<remap to="/wide_stereo/left/camera_info" from="/stereo/left/camera_info"/>
+			<remap to="/wide_stereo/right/camera_info" from="/stereo/right/camera_info"/>
+			<remap to="/wide_stereo/left/image_rect" from="/stereo/left/image_raw"/>
+			<remap to="/wide_stereo/right/image_rect" from="/stereo/right/image_raw"/>
 
         </node>
 </launch>
