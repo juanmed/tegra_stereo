@@ -80,6 +80,7 @@ private:
     bool rectifyImages_;
     int queue_size_;
     float elapsed_time_ms_acc_;
+    uint32_t elapsed_time_counter_;
 
     void publishRectifiedImages (const cv::Mat &left_rect,
                                  const cv::Mat &right_rect,

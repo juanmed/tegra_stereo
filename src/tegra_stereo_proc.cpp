@@ -137,10 +137,12 @@ void TegraStereoProc::imageCallback (
         disparity = compute_disparity_method (left_raw, right_raw, &elapsed_time_ms);
     }
     elapsed_time_ms_acc_ += elapsed_time_ms;
-    if(l_image_msg->header.seq %100 == 0 && (elapsed_time_ms_acc_ - elapsed_time_ms) > 1)
+    elapsed_time_counter_++;
+
+    if(elapsed_time_counter_ %1000 == 0)
     {
-        elapsed_time_ms_acc_ = 100000/elapsed_time_ms_acc_;
-        NODELET_INFO ("Disparity computation at %f [fps] (100 samples avg);", static_cast<double>(elapsed_time_ms_acc_));
+        elapsed_time_ms_acc_ = 1000000/elapsed_time_ms_acc_;
+        NODELET_INFO ("Disparity computation at %f [fps] (1000 samples avg);", static_cast<double>(elapsed_time_ms_acc_));
         elapsed_time_ms_acc_ = 0.0;
     }
 
