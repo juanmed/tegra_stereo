@@ -49,8 +49,8 @@ link_directories(${YAML_CPP_LIBRARY_DIRS})
 find_package(CUDA REQUIRED)
 
 set(CUDA_PROPAGATE_HOST_FLAGS OFF)
-set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++11 -w -O3 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_53,code=sm_53 -lineinfo")
-set(CUDA_ARCH "-arch=sm_53")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++11 -w -O3 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_53,code=sm_53 -gencode=arch=compute_30,code=sm_30 -lineinfo")
+set(CUDA_ARCH "-arch=sm_30")
 set(LIBSGM 
 	src/median_filter.cu  
 	src/hamming_cost.cu 
