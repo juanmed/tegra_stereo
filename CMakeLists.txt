@@ -27,7 +27,7 @@ endif ()
 
 # check for arm processor
 exec_program(uname ARGS -p OUTPUT_VARIABLE CMAKE_SYSTEM_NAME2)
-if ( CMAKE_SYSTEM_NAME2 MATCHES "aarch64" ) # i.e. Jetson TX1
+if ( CMAKE_SYSTEM_NAME2 MATCHES "aarch64" ) # i.e. Jetson TX1 (I think native would work in TX1 as well as it will pick the host arch...)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -march=armv8-a")
 else() # Ubuntu Desktop
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -march=native")
@@ -49,8 +49,19 @@ link_directories(${YAML_CPP_LIBRARY_DIRS})
 find_package(CUDA REQUIRED)
 
 set(CUDA_PROPAGATE_HOST_FLAGS OFF)
-set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++11 -w -O3 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_53,code=sm_53 -gencode=arch=compute_30,code=sm_30 -lineinfo")
-set(CUDA_ARCH "-arch=sm_30")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -std=c++11 -w -O3 -lineinfo")
+
+#virtual architectures based on this post: http://arnon.dk/matching-sm-architectures-arch-and-gencode-for-various-nvidia-cards/
+#set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_20,code=sm_20")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_30,code=sm_30")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_50,code=sm_50")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_52,code=sm_52")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_52,code=compute_52")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_60,code=sm_60")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_61,code=sm_61")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_62,code=sm_62")
+# building for phisical architecture sm_53 (i.e. TX1) , other will use JIT
+set(CUDA_ARCH "-arch=sm_53")
 set(LIBSGM 
 	src/median_filter.cu  
 	src/hamming_cost.cu 
