@@ -4,7 +4,7 @@
 	<arg name="P1" default="20" />
 	<arg name="P2" default="100" />
 
-        <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager_name)" args="manager" output="screen" launch-prefix2="gdb -ex start --args" >
+        <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager_name)" args="manager" output="screen">
         </node>
 
 

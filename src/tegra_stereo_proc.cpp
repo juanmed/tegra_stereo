@@ -76,7 +76,7 @@ void TegraStereoProc::onInit()
     info_exact_sync_->registerCallback (boost::bind (&TegraStereoProc::infoCallback, this, _1, _2));
 
     image_exact_sync_ = boost::make_shared<ImageExactSync_t> (ImageExactPolicy_t (10u), left_raw_sub_, right_raw_sub_);
-    image_exact_sync_->registerCallback (boost::bind (&TegraStereoProc::imageCallback, this, _1, _2));
+
 
     // Initialize Semi-Global Matcher
     init_disparity_method (static_cast<uint8_t> (p1_), static_cast<uint8_t> (p2_));
@@ -98,6 +98,7 @@ void TegraStereoProc::infoCallback (
         //we do not need to listen to this anymore
         right_info_sub_.unsubscribe();
         left_info_sub_.unsubscribe();
+        image_exact_sync_->registerCallback (boost::bind (&TegraStereoProc::imageCallback, this, _1, _2));
         NODELET_INFO ("Stereo calibration initialized from first message");
     });
 }
@@ -106,12 +107,6 @@ void TegraStereoProc::imageCallback (
     const sensor_msgs::ImageConstPtr &l_image_msg,
     const sensor_msgs::ImageConstPtr &r_image_msg)
 {
-
-    if (!stereo_model_.initialized())
-    {
-        NODELET_INFO ("Stereo calibration NOT initialized yet");
-        return;
-    }
 
     //Convert to CV format MONO 8bit
     const cv::Mat left_raw = cv_bridge::toCvShare (l_image_msg, sensor_msgs::image_encodings::MONO8)->image;
