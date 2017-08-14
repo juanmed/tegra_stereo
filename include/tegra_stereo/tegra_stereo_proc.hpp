@@ -63,8 +63,8 @@ private:
     ros::Publisher pub_points_;
     ros::Publisher pub_points2_;
 
-    image_transport::Publisher left_rect_pub_;
-    image_transport::Publisher right_rect_pub_;
+    image_transport::Publisher pub_rect_left_;
+    image_transport::Publisher pub_rect_right_;
 
     image_transport::Publisher pub_disparity_raw_;
 
@@ -93,15 +93,15 @@ private:
                                  const cv::Mat &right_rect,
                                  const sensor_msgs::ImageConstPtr &l_image_msg,
                                  const sensor_msgs::ImageConstPtr &r_image_msg);
-    bool processRectified(const cv::Mat left_rect_cv, const cv::Mat right_rect_cv, const std_msgs::Header &header);
+    bool processRectified(const cv::Mat &left_rect_cv, const cv::Mat &right_rect_cv, const sensor_msgs::ImageConstPtr &leftImgPtr);
     void processDisparity (const cv::Mat &disparity, const std_msgs::Header &header, stereo_msgs::DisparityImagePtr &disparityMsgPtr);
     void publishPointcloud (const cv::Mat &disparity);
-    void processPoints(const stereo_msgs::DisparityImage& disparity,
+    void processPoints(const stereo_msgs::DisparityImageConstPtr& disparity,
                                         const cv::Mat& color, const std::string& encoding,
-                                        sensor_msgs::PointCloud& points) const;
-    void processPoints2(const stereo_msgs::DisparityImage& disparity,
+                                        sensor_msgs::PointCloudPtr& points) const;
+    void processPoints2(const stereo_msgs::DisparityImageConstPtr& disparity,
                                          const cv::Mat& color, const std::string& encoding,
-                                         sensor_msgs::PointCloud2& points) const;
+                                         sensor_msgs::PointCloud2Ptr &points) const;
 };
 
 }  // namespace

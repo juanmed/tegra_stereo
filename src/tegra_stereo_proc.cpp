@@ -66,8 +66,8 @@ void TegraStereoProc::onInit()
     left_info_sub_.subscribe (nh, "/stereo/left/camera_info", 1);
     right_info_sub_.subscribe (nh, "/stereo/right/camera_info", 1);
 
-    left_rect_pub_ = imageTransport_->advertise ("/stereo/left/image_rect", 1);
-    right_rect_pub_ = imageTransport_->advertise ("/stereo/right/image_rect", 1);
+    pub_rect_left_ = imageTransport_->advertise ("/stereo/left/image_rect", 1);
+    pub_rect_right_ = imageTransport_->advertise ("/stereo/right/image_rect", 1);
     pub_disparity_raw_ = imageTransport_->advertise ("/stereo/disparity_raw", 1);
     pub_disparity_ = nh.advertise<stereo_msgs::DisparityImage> ("/stereo/disparity", 1);
     pub_points_ = nh.advertise<sensor_msgs::PointCloud> ("/stereo/points", 1);
@@ -114,9 +114,6 @@ void TegraStereoProc::imageCallback (
     const cv::Mat left_raw = cv_bridge::toCvShare (l_image_msg, sensor_msgs::image_encodings::MONO8)->image;
     const cv::Mat right_raw = cv_bridge::toCvShare (r_image_msg, sensor_msgs::image_encodings::MONO8)->image;
 
-    float elapsed_time_ms;
-    cv::Mat disparity;
-
     if (rectifyImages_)
     {
         cv::Mat left_rect;
@@ -124,27 +121,13 @@ void TegraStereoProc::imageCallback (
 
         left_model_.rectifyImage (left_raw, left_rect, cv::INTER_LINEAR);
         right_model_.rectifyImage (right_raw, right_rect, cv::INTER_LINEAR);
-
-        // Compute
-        disparity = compute_disparity_method (left_rect, right_rect, &elapsed_time_ms);
-        publishRectifiedImages (left_rect, right_rect, l_image_msg, r_image_msg);
+        publishRectifiedImages(left_rect, right_rect, l_image_msg, r_image_msg);
+        processRectified(left_rect, right_rect, l_image_msg);
     }
     else
     {
-        disparity = compute_disparity_method (left_raw, right_raw, &elapsed_time_ms);
+        processRectified(left_raw, right_raw, l_image_msg);
     }
-    elapsed_time_ms_acc_ += elapsed_time_ms;
-    elapsed_time_counter_++;
-
-    if(elapsed_time_counter_ %1000 == 0)
-    {
-        elapsed_time_ms_acc_ = 1000000/elapsed_time_ms_acc_;
-        NODELET_INFO ("Disparity computation at %f [fps] (1000 samples avg);", static_cast<double>(elapsed_time_ms_acc_));
-        elapsed_time_ms_acc_ = 0.0;
-    }
-    auto disparityMsgPtr = boost::make_shared<stereo_msgs::DisparityImage>();
-
-    //processDisparity (disparity, l_image_msg->header, disparityMsgPtr);
 
 
 }
@@ -155,17 +138,28 @@ void TegraStereoProc::publishRectifiedImages (const cv::Mat &left_rect,
         const sensor_msgs::ImageConstPtr &r_image_msg)
 {
 
-    sensor_msgs::ImagePtr left_rect_msg = cv_bridge::CvImage (l_image_msg->header, l_image_msg->encoding, left_rect).toImageMsg();
-    sensor_msgs::ImagePtr right_rect_msg = cv_bridge::CvImage (r_image_msg->header, r_image_msg->encoding, right_rect).toImageMsg();
-    left_rect_pub_.publish (left_rect_msg);
-    right_rect_pub_.publish (right_rect_msg);
+
+    if(pub_rect_left_.getNumSubscribers() > 0 )
+    {
+        sensor_msgs::ImagePtr left_rect_msg = cv_bridge::CvImage (l_image_msg->header, l_image_msg->encoding, left_rect).toImageMsg();
+        pub_rect_left_.publish (left_rect_msg);
+    }
+
+    if(pub_rect_right_.getNumSubscribers() >0 )
+    {
+        sensor_msgs::ImagePtr right_rect_msg = cv_bridge::CvImage (r_image_msg->header, r_image_msg->encoding, right_rect).toImageMsg();
+        pub_rect_right_.publish (right_rect_msg);
+    }
 }
 
-bool TegraStereoProc::processRectified(const cv::Mat left_rect_cv, const cv::Mat right_rect_cv, const std_msgs::Header &header)
+bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Mat &right_rect_cv, const sensor_msgs::ImageConstPtr &leftImgPtr)
 {
-
   // Do block matching to produce the disparity image
-  if (pub_disparity_.getNumSubscribers() >0 || pub_points_.getNumSubscribers() > 0 || pub_points2_.getNumSubscribers() >0)
+  if (
+          pub_disparity_raw_.getNumSubscribers()>0 ||
+          pub_disparity_.getNumSubscribers() >0 ||
+          pub_points_.getNumSubscribers() > 0 ||
+          pub_points2_.getNumSubscribers() >0)
   {
 
     float elapsed_time_ms;
@@ -173,28 +167,30 @@ bool TegraStereoProc::processRectified(const cv::Mat left_rect_cv, const cv::Mat
     elapsed_time_ms_acc_ += elapsed_time_ms;
     elapsed_time_counter_++;
 
+    //Print average every 1000 frames
     if(elapsed_time_counter_ %1000 == 0)
     {
         elapsed_time_ms_acc_ = 1000000/elapsed_time_ms_acc_;
         NODELET_INFO ("Disparity computation at %f [fps] (1000 samples avg);", static_cast<double>(elapsed_time_ms_acc_));
         elapsed_time_ms_acc_ = 0.0;
     }
+
     stereo_msgs::DisparityImagePtr disparity_msgPtr = boost::make_shared<stereo_msgs::DisparityImage>();
 
+
+    //publish raw disparity output
     if(pub_disparity_raw_.getNumSubscribers() >0)
     {
-        sensor_msgs::ImagePtr raw_disp_msg = cv_bridge::CvImage (header, sensor_msgs::image_encodings::MONO8, disparity_raw).toImageMsg();
+        sensor_msgs::ImagePtr raw_disp_msg = cv_bridge::CvImage (leftImgPtr->header, sensor_msgs::image_encodings::MONO8, disparity_raw).toImageMsg();
         pub_disparity_raw_.publish (raw_disp_msg);
     }
 
-    processDisparity (disparity_raw, header, disparity_msgPtr);
+    //scale the disparity and publish
+    processDisparity (disparity_raw, leftImgPtr->header, disparity_msgPtr);
 
     if(pub_disparity_.getNumSubscribers()>0)
     {
-        if (pub_disparity_.getNumSubscribers() > 0)
-        {
-            pub_disparity_.publish (disparity_msgPtr);
-        }
+        pub_disparity_.publish (disparity_msgPtr);
     }
 
     // Project disparity image to 3d point cloud
@@ -206,7 +202,9 @@ bool TegraStereoProc::processRectified(const cv::Mat left_rect_cv, const cv::Mat
     // Project disparity image to 3d point cloud
     if (pub_points2_.getNumSubscribers() > 0)
     {
-      //processPoints2(disparity_msgPtr, output.left.rect_color, output.left.color_encoding, model, output.points2);
+        sensor_msgs::PointCloud2Ptr points2 = boost::make_shared<sensor_msgs::PointCloud2>();
+        processPoints2(disparity_msgPtr, left_rect_cv, leftImgPtr->encoding, points2);
+        pub_points2_.publish(points2);
     }
 
   }
@@ -262,24 +260,24 @@ inline bool isValidPoint(const cv::Vec3f& pt)
   return pt[2] != image_geometry::StereoCameraModel::MISSING_Z && !std::isinf(pt[2]);
 }
 
-void TegraStereoProc::processPoints(const stereo_msgs::DisparityImage& disparity,
+void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& disparity,
                                     const cv::Mat& color, const std::string& encoding,
-                                    sensor_msgs::PointCloud& points) const
+                                    sensor_msgs::PointCloudPtr &points) const
 {
   // Calculate dense point cloud
-  const sensor_msgs::Image& dimage = disparity.image;
+  const sensor_msgs::Image& dimage = disparity->image;
   const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
   stereo_model_.projectDisparityImageTo3d(dmat, dense_points_, true);
 
   // Fill in sparse point cloud message
-  points.points.resize(0);
-  points.channels.resize(3);
-  points.channels[0].name = "rgb";
-  points.channels[0].values.resize(0);
-  points.channels[1].name = "u";
-  points.channels[1].values.resize(0);
-  points.channels[2].name = "v";
-  points.channels[2].values.resize(0);
+  points->points.resize(0);
+  points->channels.resize(3);
+  points->channels[0].name = "rgb";
+  points->channels[0].values.resize(0);
+  points->channels[1].name = "u";
+  points->channels[1].values.resize(0);
+  points->channels[2].name = "v";
+  points->channels[2].values.resize(0);
 
   for (int32_t u = 0; u < dense_points_.rows; ++u) {
     for (int32_t v = 0; v < dense_points_.cols; ++v) {
@@ -289,24 +287,24 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImage& disparity
         pt.x = dense_points_(u,v)[0];
         pt.y = dense_points_(u,v)[1];
         pt.z = dense_points_(u,v)[2];
-        points.points.push_back(pt);
+        points->points.push_back(pt);
         // u,v
-        points.channels[1].values.push_back(u);
-        points.channels[2].values.push_back(v);
+        points->channels[1].values.push_back(u);
+        points->channels[2].values.push_back(v);
       }
     }
   }
 
   // Fill in color
   namespace enc = sensor_msgs::image_encodings;
-  points.channels[0].values.reserve(points.points.size());
+  points->channels[0].values.reserve(points->points.size());
   if (encoding == enc::MONO8) {
     for (int32_t u = 0; u < dense_points_.rows; ++u) {
       for (int32_t v = 0; v < dense_points_.cols; ++v) {
         if (isValidPoint(dense_points_(u,v))) {
           uint8_t g = color.at<uint8_t>(u,v);
           int32_t rgb = (g << 16) | (g << 8) | g;
-          points.channels[0].values.push_back(*(float*)(&rgb));
+          points->channels[0].values.push_back(*(float*)(&rgb));
         }
       }
     }
@@ -317,7 +315,7 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImage& disparity
         if (isValidPoint(dense_points_(u,v))) {
           const cv::Vec3b& rgb = color.at<cv::Vec3b>(u,v);
           int32_t rgb_packed = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
-          points.channels[0].values.push_back(*(float*)(&rgb_packed));
+          points->channels[0].values.push_back(*(float*)(&rgb_packed));
         }
       }
     }
@@ -328,7 +326,7 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImage& disparity
         if (isValidPoint(dense_points_(u,v))) {
           const cv::Vec3b& bgr = color.at<cv::Vec3b>(u,v);
           int32_t rgb_packed = (bgr[2] << 16) | (bgr[1] << 8) | bgr[0];
-          points.channels[0].values.push_back(*(float*)(&rgb_packed));
+          points->channels[0].values.push_back(*(float*)(&rgb_packed));
         }
       }
     }
@@ -338,40 +336,42 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImage& disparity
   }
 }
 
-void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImage& disparity,
+void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
                                      const cv::Mat& color, const std::string& encoding,
-                                     sensor_msgs::PointCloud2& points) const
+                                     sensor_msgs::PointCloud2Ptr &pointsMsgPrt) const
 {
   // Calculate dense point cloud
-  const sensor_msgs::Image& dimage = disparity.image;
+  const sensor_msgs::Image& dimage = disparityMsgPrt->image;
+  pointsMsgPrt->header = disparityMsgPrt->header;
+
   const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
   stereo_model_.projectDisparityImageTo3d(dmat, dense_points_, true);
 
   // Fill in sparse point cloud message
-  points.height = dense_points_.rows;
-  points.width  = dense_points_.cols;
-  points.fields.resize (4);
-  points.fields[0].name = "x";
-  points.fields[0].offset = 0;
-  points.fields[0].count = 1;
-  points.fields[0].datatype = sensor_msgs::PointField::FLOAT32;
-  points.fields[1].name = "y";
-  points.fields[1].offset = 4;
-  points.fields[1].count = 1;
-  points.fields[1].datatype = sensor_msgs::PointField::FLOAT32;
-  points.fields[2].name = "z";
-  points.fields[2].offset = 8;
-  points.fields[2].count = 1;
-  points.fields[2].datatype = sensor_msgs::PointField::FLOAT32;
-  points.fields[3].name = "rgb";
-  points.fields[3].offset = 12;
-  points.fields[3].count = 1;
-  points.fields[3].datatype = sensor_msgs::PointField::FLOAT32;
-  //points.is_bigendian = false; ???
-  points.point_step = 16;
-  points.row_step = points.point_step * points.width;
-  points.data.resize (points.row_step * points.height);
-  points.is_dense = false; // there may be invalid points
+  pointsMsgPrt->height = dense_points_.rows;
+  pointsMsgPrt->width  = dense_points_.cols;
+  pointsMsgPrt->fields.resize (4);
+  pointsMsgPrt->fields[0].name = "x";
+  pointsMsgPrt->fields[0].offset = 0;
+  pointsMsgPrt->fields[0].count = 1;
+  pointsMsgPrt->fields[0].datatype = sensor_msgs::PointField::FLOAT32;
+  pointsMsgPrt->fields[1].name = "y";
+  pointsMsgPrt->fields[1].offset = 4;
+  pointsMsgPrt->fields[1].count = 1;
+  pointsMsgPrt->fields[1].datatype = sensor_msgs::PointField::FLOAT32;
+  pointsMsgPrt->fields[2].name = "z";
+  pointsMsgPrt->fields[2].offset = 8;
+  pointsMsgPrt->fields[2].count = 1;
+  pointsMsgPrt->fields[2].datatype = sensor_msgs::PointField::FLOAT32;
+  pointsMsgPrt->fields[3].name = "rgb";
+  pointsMsgPrt->fields[3].offset = 12;
+  pointsMsgPrt->fields[3].count = 1;
+  pointsMsgPrt->fields[3].datatype = sensor_msgs::PointField::FLOAT32;
+  //points->is_bigendian = false; ???
+  pointsMsgPrt->point_step = 16;
+  pointsMsgPrt->row_step = pointsMsgPrt->point_step * pointsMsgPrt->width;
+  pointsMsgPrt->data.resize (pointsMsgPrt->row_step * pointsMsgPrt->height);
+  pointsMsgPrt->is_dense = false; // there may be invalid points
 
   float bad_point = std::numeric_limits<float>::quiet_NaN ();
   int i = 0;
@@ -379,14 +379,14 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImage& disparit
     for (int32_t v = 0; v < dense_points_.cols; ++v, ++i) {
       if (isValidPoint(dense_points_(u,v))) {
         // x,y,z,rgba
-        memcpy (&points.data[i * points.point_step + 0], &dense_points_(u,v)[0], sizeof (float));
-        memcpy (&points.data[i * points.point_step + 4], &dense_points_(u,v)[1], sizeof (float));
-        memcpy (&points.data[i * points.point_step + 8], &dense_points_(u,v)[2], sizeof (float));
+        memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 0], &dense_points_(u,v)[0], sizeof (float));
+        memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 4], &dense_points_(u,v)[1], sizeof (float));
+        memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 8], &dense_points_(u,v)[2], sizeof (float));
       }
       else {
-        memcpy (&points.data[i * points.point_step + 0], &bad_point, sizeof (float));
-        memcpy (&points.data[i * points.point_step + 4], &bad_point, sizeof (float));
-        memcpy (&points.data[i * points.point_step + 8], &bad_point, sizeof (float));
+        memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 0], &bad_point, sizeof (float));
+        memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 4], &bad_point, sizeof (float));
+        memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 8], &bad_point, sizeof (float));
       }
     }
   }
@@ -400,10 +400,10 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImage& disparit
         if (isValidPoint(dense_points_(u,v))) {
           uint8_t g = color.at<uint8_t>(u,v);
           int32_t rgb = (g << 16) | (g << 8) | g;
-          memcpy (&points.data[i * points.point_step + 12], &rgb, sizeof (int32_t));
+          memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 12], &rgb, sizeof (int32_t));
         }
         else {
-          memcpy (&points.data[i * points.point_step + 12], &bad_point, sizeof (float));
+          memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 12], &bad_point, sizeof (float));
         }
       }
     }
@@ -414,10 +414,10 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImage& disparit
         if (isValidPoint(dense_points_(u,v))) {
           const cv::Vec3b& rgb = color.at<cv::Vec3b>(u,v);
           int32_t rgb_packed = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
-          memcpy (&points.data[i * points.point_step + 12], &rgb_packed, sizeof (int32_t));
+          memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 12], &rgb_packed, sizeof (int32_t));
         }
         else {
-          memcpy (&points.data[i * points.point_step + 12], &bad_point, sizeof (float));
+          memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 12], &bad_point, sizeof (float));
         }
       }
     }
@@ -428,10 +428,10 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImage& disparit
         if (isValidPoint(dense_points_(u,v))) {
           const cv::Vec3b& bgr = color.at<cv::Vec3b>(u,v);
           int32_t rgb_packed = (bgr[2] << 16) | (bgr[1] << 8) | bgr[0];
-          memcpy (&points.data[i * points.point_step + 12], &rgb_packed, sizeof (int32_t));
+          memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 12], &rgb_packed, sizeof (int32_t));
         }
         else {
-          memcpy (&points.data[i * points.point_step + 12], &bad_point, sizeof (float));
+          memcpy (&pointsMsgPrt->data[i * pointsMsgPrt->point_step + 12], &bad_point, sizeof (float));
         }
       }
     }
