@@ -80,14 +80,21 @@ private:
     mutable cv::Mat_<cv::Vec3f> dense_points_;
 
 
-    // stereo matching
+    // stereo matching parameters, more in configuration.h
+    ///
+    /// \brief p1_ penalties for small disparity changes
+    ///
     int p1_;
+    ///
+    /// \brief p2_ penalties for larger disparity discontinuities
+    ///
     int p2_;
 
     bool rectifyImages_;
     int queue_size_;
     float elapsed_time_ms_acc_;
     uint32_t elapsed_time_counter_;
+    std::string out_frame_id;
 
     void publishRectifiedImages (const cv::Mat &left_rect,
                                  const cv::Mat &right_rect,
@@ -96,10 +103,10 @@ private:
     bool processRectified(const cv::Mat &left_rect_cv, const cv::Mat &right_rect_cv, const sensor_msgs::ImageConstPtr &leftImgPtr);
     void processDisparity (const cv::Mat &disparity, const std_msgs::Header &header, stereo_msgs::DisparityImagePtr &disparityMsgPtr);
     void publishPointcloud (const cv::Mat &disparity);
-    void processPoints(const stereo_msgs::DisparityImageConstPtr& disparity,
+    void processPoints(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
                                         const cv::Mat& color, const std::string& encoding,
                                         sensor_msgs::PointCloudPtr& points) const;
-    void processPoints2(const stereo_msgs::DisparityImageConstPtr& disparity,
+    void processPoints2(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
                                          const cv::Mat& color, const std::string& encoding,
                                          sensor_msgs::PointCloud2Ptr &points) const;
 };

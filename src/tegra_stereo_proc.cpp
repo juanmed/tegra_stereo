@@ -28,8 +28,10 @@ void TegraStereoProc::onInit()
     private_nh.param<int> ("P1", p1_, 20);
     private_nh.param<int> ("P2", p2_, 100);
 
-    private_nh.param<int> ("queue_size", queue_size_, 10u);
+    private_nh.param<int> ("queue_size", queue_size_, 1u);
     private_nh.param<bool> ("rectify_images", rectifyImages_, true);
+    private_nh.param<std::string> ("out_frame_id", out_frame_id, "");
+
 
     //camera calibration files
     std::string cameraCalibrationFileLeft;
@@ -55,16 +57,16 @@ void TegraStereoProc::onInit()
     }
     else
     {
-        NODELET_INFO ("Stereo calibration files are not specified");
+        NODELET_INFO ("Stereo calibration files are not specified ,waiting for camera_info messages");
     }
 
     imageTransport_ = boost::make_shared<image_transport::ImageTransport> (nh);
 
-    left_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/left/image_raw", 1);
-    right_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/right/image_raw", 1);
+    left_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/left/image_raw", queue_size_);
+    right_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/right/image_raw", queue_size_);
 
-    left_info_sub_.subscribe (nh, "/stereo/left/camera_info", 1);
-    right_info_sub_.subscribe (nh, "/stereo/right/camera_info", 1);
+    left_info_sub_.subscribe (nh, "/stereo/left/camera_info", queue_size_);
+    right_info_sub_.subscribe (nh, "/stereo/right/camera_info", queue_size_);
 
     pub_rect_left_ = imageTransport_->advertise ("/stereo/left/image_rect", 1);
     pub_rect_right_ = imageTransport_->advertise ("/stereo/right/image_rect", 1);
@@ -142,12 +144,20 @@ void TegraStereoProc::publishRectifiedImages (const cv::Mat &left_rect,
     if(pub_rect_left_.getNumSubscribers() > 0 )
     {
         sensor_msgs::ImagePtr left_rect_msg = cv_bridge::CvImage (l_image_msg->header, l_image_msg->encoding, left_rect).toImageMsg();
+        if(out_frame_id.length() > 0)
+        {
+            left_rect_msg->header.frame_id = out_frame_id;
+        }
         pub_rect_left_.publish (left_rect_msg);
     }
 
     if(pub_rect_right_.getNumSubscribers() >0 )
     {
         sensor_msgs::ImagePtr right_rect_msg = cv_bridge::CvImage (r_image_msg->header, r_image_msg->encoding, right_rect).toImageMsg();
+        if(out_frame_id.length() > 0)
+        {
+            right_rect_msg->header.frame_id = out_frame_id;
+        }
         pub_rect_right_.publish (right_rect_msg);
     }
 }
@@ -182,6 +192,10 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
     if(pub_disparity_raw_.getNumSubscribers() >0)
     {
         sensor_msgs::ImagePtr raw_disp_msg = cv_bridge::CvImage (leftImgPtr->header, sensor_msgs::image_encodings::MONO8, disparity_raw).toImageMsg();
+        if(out_frame_id.length() > 0)
+        {
+            raw_disp_msg->header.frame_id = out_frame_id;
+        }
         pub_disparity_raw_.publish (raw_disp_msg);
     }
 
@@ -196,7 +210,9 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
     // Project disparity image to 3d point cloud
     if (pub_points_.getNumSubscribers() > 0)
     {
-      //processPoints(disparity_msgPtr, output.left.rect_color, output.left.color_encoding, model, output.points);
+        sensor_msgs::PointCloudPtr points = boost::make_shared<sensor_msgs::PointCloud>();
+        processPoints(disparity_msgPtr, left_rect_cv, leftImgPtr->encoding, points);
+        pub_points_.publish(points);
     }
 
     // Project disparity image to 3d point cloud
@@ -221,6 +237,11 @@ void TegraStereoProc::processDisparity (const cv::Mat &disparity, const std_msgs
 
 
     disparityMsgPtr->header = disparityMsgPtr->image.header = header;
+    if(out_frame_id.length() > 0)
+    {
+        disparityMsgPtr->header.frame_id = out_frame_id;
+        disparityMsgPtr->image.header.frame_id = out_frame_id;
+    }
 
     auto &dimage = disparityMsgPtr->image;
     dimage.height = left_model_.cameraInfo().height; // TODO hack
@@ -260,24 +281,29 @@ inline bool isValidPoint(const cv::Vec3f& pt)
   return pt[2] != image_geometry::StereoCameraModel::MISSING_Z && !std::isinf(pt[2]);
 }
 
-void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& disparity,
+void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
                                     const cv::Mat& color, const std::string& encoding,
-                                    sensor_msgs::PointCloudPtr &points) const
+                                    sensor_msgs::PointCloudPtr &pointsMsgPtr) const
 {
+    pointsMsgPtr->header = disparityMsgPrt->header;
+    if(out_frame_id.length() > 0)
+    {
+        pointsMsgPtr->header.frame_id = out_frame_id;
+    }
   // Calculate dense point cloud
-  const sensor_msgs::Image& dimage = disparity->image;
+  const sensor_msgs::Image& dimage = disparityMsgPrt->image;
   const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
   stereo_model_.projectDisparityImageTo3d(dmat, dense_points_, true);
 
   // Fill in sparse point cloud message
-  points->points.resize(0);
-  points->channels.resize(3);
-  points->channels[0].name = "rgb";
-  points->channels[0].values.resize(0);
-  points->channels[1].name = "u";
-  points->channels[1].values.resize(0);
-  points->channels[2].name = "v";
-  points->channels[2].values.resize(0);
+  pointsMsgPtr->points.resize(0);
+  pointsMsgPtr->channels.resize(3);
+  pointsMsgPtr->channels[0].name = "rgb";
+  pointsMsgPtr->channels[0].values.resize(0);
+  pointsMsgPtr->channels[1].name = "u";
+  pointsMsgPtr->channels[1].values.resize(0);
+  pointsMsgPtr->channels[2].name = "v";
+  pointsMsgPtr->channels[2].values.resize(0);
 
   for (int32_t u = 0; u < dense_points_.rows; ++u) {
     for (int32_t v = 0; v < dense_points_.cols; ++v) {
@@ -287,24 +313,24 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& d
         pt.x = dense_points_(u,v)[0];
         pt.y = dense_points_(u,v)[1];
         pt.z = dense_points_(u,v)[2];
-        points->points.push_back(pt);
+        pointsMsgPtr->points.push_back(pt);
         // u,v
-        points->channels[1].values.push_back(u);
-        points->channels[2].values.push_back(v);
+        pointsMsgPtr->channels[1].values.push_back(u);
+        pointsMsgPtr->channels[2].values.push_back(v);
       }
     }
   }
 
   // Fill in color
   namespace enc = sensor_msgs::image_encodings;
-  points->channels[0].values.reserve(points->points.size());
+  pointsMsgPtr->channels[0].values.reserve(pointsMsgPtr->points.size());
   if (encoding == enc::MONO8) {
     for (int32_t u = 0; u < dense_points_.rows; ++u) {
       for (int32_t v = 0; v < dense_points_.cols; ++v) {
         if (isValidPoint(dense_points_(u,v))) {
           uint8_t g = color.at<uint8_t>(u,v);
           int32_t rgb = (g << 16) | (g << 8) | g;
-          points->channels[0].values.push_back(*(float*)(&rgb));
+          pointsMsgPtr->channels[0].values.push_back(*(float*)(&rgb));
         }
       }
     }
@@ -315,7 +341,7 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& d
         if (isValidPoint(dense_points_(u,v))) {
           const cv::Vec3b& rgb = color.at<cv::Vec3b>(u,v);
           int32_t rgb_packed = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
-          points->channels[0].values.push_back(*(float*)(&rgb_packed));
+          pointsMsgPtr->channels[0].values.push_back(*(float*)(&rgb_packed));
         }
       }
     }
@@ -326,7 +352,7 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& d
         if (isValidPoint(dense_points_(u,v))) {
           const cv::Vec3b& bgr = color.at<cv::Vec3b>(u,v);
           int32_t rgb_packed = (bgr[2] << 16) | (bgr[1] << 8) | bgr[0];
-          points->channels[0].values.push_back(*(float*)(&rgb_packed));
+          pointsMsgPtr->channels[0].values.push_back(*(float*)(&rgb_packed));
         }
       }
     }
@@ -343,6 +369,11 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImageConstPtr& 
   // Calculate dense point cloud
   const sensor_msgs::Image& dimage = disparityMsgPrt->image;
   pointsMsgPrt->header = disparityMsgPrt->header;
+  if(out_frame_id.length() > 0)
+  {
+      pointsMsgPrt->header.frame_id = out_frame_id;
+  }
+
 
   const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
   stereo_model_.projectDisparityImageTo3d(dmat, dense_points_, true);
