@@ -61,7 +61,7 @@ set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_60,code=sm_60")
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_61,code=sm_61")
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -gencode=arch=compute_62,code=sm_62")
 # building for phisical architecture sm_53 (i.e. TX1) , other will use JIT
-set(CUDA_ARCH "-arch=sm_53")
+set(CUDA_ARCH "-arch=sm_62")
 set(LIBSGM 
 	src/median_filter.cu  
 	src/hamming_cost.cu 

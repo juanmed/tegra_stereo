@@ -15,6 +15,8 @@
 #include <message_filters/sync_policies/exact_time.h>
 
 #include <sensor_msgs/image_encodings.h>
+#include <sensor_msgs/PointCloud.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <stereo_msgs/DisparityImage.h>
 
 #include <image_geometry/stereo_camera_model.h>
@@ -27,7 +29,6 @@
 namespace tegra_stereo
 {
 
-using stereo_msgs::DisparityImage;
 using message_filters::sync_policies::ExactTime;
 
 class TegraStereoProc : public nodelet::Nodelet
@@ -59,11 +60,13 @@ private:
     boost::shared_ptr<InfoExactSync_t> info_exact_sync_;
 
     ros::Publisher pub_disparity_;
+    ros::Publisher pub_points_;
+    ros::Publisher pub_points2_;
 
-    image_transport::Publisher left_rect_pub_;
-    image_transport::Publisher right_rect_pub_;
+    image_transport::Publisher pub_rect_left_;
+    image_transport::Publisher pub_rect_right_;
 
-    image_transport::Publisher raw_disparity_pub_;
+    image_transport::Publisher pub_disparity_raw_;
 
     //
     sensor_msgs::CameraInfoPtr mCameraInfoLeftPtr_;
@@ -73,22 +76,39 @@ private:
     image_geometry::PinholeCameraModel right_model_;
     image_geometry::StereoCameraModel stereo_model_;
 
-    // stereo matching
+    // scratch buffer for dense point cloud
+    mutable cv::Mat_<cv::Vec3f> dense_points_;
+
+
+    // stereo matching parameters, more in configuration.h
+    ///
+    /// \brief p1_ penalties for small disparity changes
+    ///
     int p1_;
+    ///
+    /// \brief p2_ penalties for larger disparity discontinuities
+    ///
     int p2_;
 
     bool rectifyImages_;
     int queue_size_;
     float elapsed_time_ms_acc_;
     uint32_t elapsed_time_counter_;
+    std::string out_frame_id;
 
     void publishRectifiedImages (const cv::Mat &left_rect,
                                  const cv::Mat &right_rect,
                                  const sensor_msgs::ImageConstPtr &l_image_msg,
                                  const sensor_msgs::ImageConstPtr &r_image_msg);
-    void publishDisparity (const cv::Mat &disparity, const std_msgs::Header &header);
+    bool processRectified(const cv::Mat &left_rect_cv, const cv::Mat &right_rect_cv, const sensor_msgs::ImageConstPtr &leftImgPtr);
+    void processDisparity (const cv::Mat &disparity, const std_msgs::Header &header, stereo_msgs::DisparityImagePtr &disparityMsgPtr);
     void publishPointcloud (const cv::Mat &disparity);
-
+    void processPoints(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
+                                        const cv::Mat& color, const std::string& encoding,
+                                        sensor_msgs::PointCloudPtr& points) const;
+    void processPoints2(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
+                                         const cv::Mat& color, const std::string& encoding,
+                                         sensor_msgs::PointCloud2Ptr &points) const;
 };
 
 }  // namespace
