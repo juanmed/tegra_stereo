@@ -63,14 +63,14 @@ private:
     ros::Publisher pub_points_;
     ros::Publisher pub_points2_;
 
-    image_transport::Publisher pub_rect_left_;
-    image_transport::Publisher pub_rect_right_;
+    image_transport::CameraPublisher pub_rect_left_;
+    image_transport::CameraPublisher pub_rect_right_;
 
     image_transport::Publisher pub_disparity_raw_;
 
     //
-    sensor_msgs::CameraInfoPtr mCameraInfoLeftPtr_;
-    sensor_msgs::CameraInfoPtr mCameraInfoRightPtr_;
+    sensor_msgs::CameraInfo mCameraInfoLeft_;
+    sensor_msgs::CameraInfo mCameraInfoRight_;
     // camera models
     image_geometry::PinholeCameraModel left_model_;
     image_geometry::PinholeCameraModel right_model_;
@@ -94,7 +94,8 @@ private:
     int queue_size_;
     float elapsed_time_ms_acc_;
     uint32_t elapsed_time_counter_;
-    std::string out_frame_id;
+    std::string out_left_frame_id;
+    std::string out_right_frame_id;
 
     void publishRectifiedImages (const cv::Mat &left_rect,
                                  const cv::Mat &right_rect,

@@ -22,7 +22,6 @@ TegraStereoProc::~TegraStereoProc() {}
 void TegraStereoProc::onInit()
 {
 
-    ros::NodeHandle &nh = getNodeHandle();
     ros::NodeHandle &private_nh = getPrivateNodeHandle();
 
     private_nh.param<int> ("P1", p1_, 20);
@@ -30,7 +29,8 @@ void TegraStereoProc::onInit()
 
     private_nh.param<int> ("queue_size", queue_size_, 1u);
     private_nh.param<bool> ("rectify_images", rectifyImages_, true);
-    private_nh.param<std::string> ("out_frame_id", out_frame_id, "");
+    private_nh.param<std::string> ("out_left_frame_id", out_left_frame_id, "");
+    private_nh.param<std::string> ("out_right_frame_id", out_right_frame_id, "");
 
 
     //camera calibration files
@@ -42,16 +42,14 @@ void TegraStereoProc::onInit()
     if (! (cameraCalibrationFileRight.empty() && cameraCalibrationFileLeft.empty()))
     {
         std::string cameraName;
-        mCameraInfoLeftPtr_ = boost::make_shared<sensor_msgs::CameraInfo>();
-        mCameraInfoRightPtr_ = boost::make_shared<sensor_msgs::CameraInfo>();
         NODELET_INFO_STREAM ("Stereo calibration left:" << cameraCalibrationFileLeft);
         NODELET_INFO_STREAM ("Stereo calibration right:" << cameraCalibrationFileRight);
-        camera_calibration_parsers::readCalibration (cameraCalibrationFileLeft, cameraName, *mCameraInfoLeftPtr_);
-        camera_calibration_parsers::readCalibration (cameraCalibrationFileRight, cameraName, *mCameraInfoRightPtr_);
+        camera_calibration_parsers::readCalibration (cameraCalibrationFileLeft, cameraName, mCameraInfoLeft_);
+        camera_calibration_parsers::readCalibration (cameraCalibrationFileRight, cameraName, mCameraInfoRight_);
 
-        left_model_.fromCameraInfo (mCameraInfoLeftPtr_);
-        right_model_.fromCameraInfo (mCameraInfoRightPtr_);
-        stereo_model_.fromCameraInfo (mCameraInfoLeftPtr_, mCameraInfoRightPtr_);
+        left_model_.fromCameraInfo (mCameraInfoLeft_);
+        right_model_.fromCameraInfo (mCameraInfoRight_);
+        stereo_model_.fromCameraInfo (mCameraInfoLeft_, mCameraInfoRight_);
         NODELET_INFO ("Stereo calibration initialized from file");
 
     }
@@ -60,20 +58,20 @@ void TegraStereoProc::onInit()
         NODELET_INFO ("Stereo calibration files are not specified ,waiting for camera_info messages");
     }
 
-    imageTransport_ = boost::make_shared<image_transport::ImageTransport> (nh);
+    imageTransport_ = boost::make_shared<image_transport::ImageTransport> (private_nh);
 
     left_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/left/image_raw", queue_size_);
     right_raw_sub_.subscribe (*imageTransport_.get(), "/stereo/right/image_raw", queue_size_);
 
-    left_info_sub_.subscribe (nh, "/stereo/left/camera_info", queue_size_);
-    right_info_sub_.subscribe (nh, "/stereo/right/camera_info", queue_size_);
+    left_info_sub_.subscribe (private_nh, "/stereo/left/camera_info", queue_size_);
+    right_info_sub_.subscribe (private_nh, "/stereo/right/camera_info", queue_size_);
 
-    pub_rect_left_ = imageTransport_->advertise ("/stereo/left/image_rect", 1);
-    pub_rect_right_ = imageTransport_->advertise ("/stereo/right/image_rect", 1);
-    pub_disparity_raw_ = imageTransport_->advertise ("/stereo/disparity_raw", 1);
-    pub_disparity_ = nh.advertise<stereo_msgs::DisparityImage> ("/stereo/disparity", 1);
-    pub_points_ = nh.advertise<sensor_msgs::PointCloud> ("/stereo/points", 1);
-    pub_points2_ = nh.advertise<sensor_msgs::PointCloud2> ("/stereo/points2", 1);
+    pub_rect_left_ = imageTransport_->advertiseCamera ("left/image_rect", 1);
+    pub_rect_right_ = imageTransport_->advertiseCamera("right/image_rect", 1);
+    pub_disparity_raw_ = imageTransport_->advertise ("disparity_raw", 1);
+    pub_disparity_ = private_nh.advertise<stereo_msgs::DisparityImage> ("disparity", 1);
+    pub_points_ = private_nh.advertise<sensor_msgs::PointCloud> ("points", 1);
+    pub_points2_ = private_nh.advertise<sensor_msgs::PointCloud2> ("points2", 1);
 
     // Synchronize input topics
     info_exact_sync_ = boost::make_shared<InfoExactSync_t> (InfoExactPolicy_t (10u), left_info_sub_, right_info_sub_);
@@ -96,6 +94,8 @@ void TegraStereoProc::infoCallback (
     std::call_once (calibration_initialized_flag_, [ &, this] ()
     {
 
+        mCameraInfoLeft_ = *l_info_msg;
+        mCameraInfoRight_ = *r_info_msg;
         left_model_.fromCameraInfo (l_info_msg);
         right_model_.fromCameraInfo (r_info_msg);
         stereo_model_.fromCameraInfo (l_info_msg, r_info_msg);
@@ -144,21 +144,23 @@ void TegraStereoProc::publishRectifiedImages (const cv::Mat &left_rect,
     if(pub_rect_left_.getNumSubscribers() > 0 )
     {
         sensor_msgs::ImagePtr left_rect_msg = cv_bridge::CvImage (l_image_msg->header, l_image_msg->encoding, left_rect).toImageMsg();
-        if(out_frame_id.length() > 0)
+        if(out_left_frame_id.length() > 0)
         {
-            left_rect_msg->header.frame_id = out_frame_id;
+            left_rect_msg->header.frame_id = out_left_frame_id;
         }
-        pub_rect_left_.publish (left_rect_msg);
+        mCameraInfoLeft_.header = left_rect_msg->header;
+        pub_rect_left_.publish (left_rect_msg, boost::make_shared<sensor_msgs::CameraInfo>(mCameraInfoLeft_));
     }
 
     if(pub_rect_right_.getNumSubscribers() >0 )
     {
         sensor_msgs::ImagePtr right_rect_msg = cv_bridge::CvImage (r_image_msg->header, r_image_msg->encoding, right_rect).toImageMsg();
-        if(out_frame_id.length() > 0)
+        if(out_right_frame_id.length() > 0)
         {
-            right_rect_msg->header.frame_id = out_frame_id;
+            right_rect_msg->header.frame_id = out_right_frame_id;
         }
-        pub_rect_right_.publish (right_rect_msg);
+        mCameraInfoRight_.header = right_rect_msg->header;
+        pub_rect_right_.publish(right_rect_msg, boost::make_shared<sensor_msgs::CameraInfo>(mCameraInfoRight_));
     }
 }
 
@@ -192,9 +194,9 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
     if(pub_disparity_raw_.getNumSubscribers() >0)
     {
         sensor_msgs::ImagePtr raw_disp_msg = cv_bridge::CvImage (leftImgPtr->header, sensor_msgs::image_encodings::MONO8, disparity_raw).toImageMsg();
-        if(out_frame_id.length() > 0)
+        if(out_left_frame_id.length() > 0)
         {
-            raw_disp_msg->header.frame_id = out_frame_id;
+            raw_disp_msg->header.frame_id = out_left_frame_id;
         }
         pub_disparity_raw_.publish (raw_disp_msg);
     }
@@ -237,10 +239,10 @@ void TegraStereoProc::processDisparity (const cv::Mat &disparity, const std_msgs
 
 
     disparityMsgPtr->header = disparityMsgPtr->image.header = header;
-    if(out_frame_id.length() > 0)
+    if(out_left_frame_id.length() > 0)
     {
-        disparityMsgPtr->header.frame_id = out_frame_id;
-        disparityMsgPtr->image.header.frame_id = out_frame_id;
+        disparityMsgPtr->header.frame_id = out_left_frame_id;
+        disparityMsgPtr->image.header.frame_id = out_left_frame_id;
     }
 
     auto &dimage = disparityMsgPtr->image;
@@ -286,9 +288,9 @@ void TegraStereoProc::processPoints(const stereo_msgs::DisparityImageConstPtr& d
                                     sensor_msgs::PointCloudPtr &pointsMsgPtr) const
 {
     pointsMsgPtr->header = disparityMsgPrt->header;
-    if(out_frame_id.length() > 0)
+    if(out_left_frame_id.length() > 0)
     {
-        pointsMsgPtr->header.frame_id = out_frame_id;
+        pointsMsgPtr->header.frame_id = out_left_frame_id;
     }
   // Calculate dense point cloud
   const sensor_msgs::Image& dimage = disparityMsgPrt->image;
@@ -369,9 +371,9 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImageConstPtr& 
   // Calculate dense point cloud
   const sensor_msgs::Image& dimage = disparityMsgPrt->image;
   pointsMsgPrt->header = disparityMsgPrt->header;
-  if(out_frame_id.length() > 0)
+  if(out_left_frame_id.length() > 0)
   {
-      pointsMsgPrt->header.frame_id = out_frame_id;
+      pointsMsgPrt->header.frame_id = out_left_frame_id;
   }
 
 
