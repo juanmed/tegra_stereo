@@ -12,7 +12,6 @@
  */
 
 #include "tegra_stereo/tegra_stereo_proc.hpp"
-
 namespace tegra_stereo
 {
 
@@ -68,7 +67,7 @@ void TegraStereoProc::onInit()
 
     pub_rect_left_ = imageTransport_->advertiseCamera ("left/image_rect", 1);
     pub_rect_right_ = imageTransport_->advertiseCamera("right/image_rect", 1);
-    pub_disparity_raw_ = imageTransport_->advertise ("disparity_raw", 1);
+    pub_disparity_raw_ = imageTransport_->advertiseCamera("disparity_raw/image_raw", 1);
     pub_disparity_ = private_nh.advertise<stereo_msgs::DisparityImage> ("disparity", 1);
     pub_points_ = private_nh.advertise<sensor_msgs::PointCloud> ("points", 1);
     pub_points2_ = private_nh.advertise<sensor_msgs::PointCloud2> ("points2", 1);
@@ -190,7 +189,7 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
     stereo_msgs::DisparityImagePtr disparity_msgPtr = boost::make_shared<stereo_msgs::DisparityImage>();
 
 
-    //publish raw disparity output
+    //publish raw disparity output in pixels
     if(pub_disparity_raw_.getNumSubscribers() >0)
     {
         sensor_msgs::ImagePtr raw_disp_msg = cv_bridge::CvImage (leftImgPtr->header, sensor_msgs::image_encodings::MONO8, disparity_raw).toImageMsg();
@@ -198,7 +197,8 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
         {
             raw_disp_msg->header.frame_id = out_left_frame_id;
         }
-        pub_disparity_raw_.publish (raw_disp_msg);
+        mCameraInfoLeft_.header = leftImgPtr->header;
+        pub_disparity_raw_.publish (raw_disp_msg, boost::make_shared<sensor_msgs::CameraInfo>(mCameraInfoLeft_));
     }
 
     //scale the disparity and publish

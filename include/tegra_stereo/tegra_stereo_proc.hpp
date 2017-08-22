@@ -21,6 +21,8 @@
 
 #include <image_geometry/stereo_camera_model.h>
 #include <camera_calibration_parsers/parse.h>
+
+#include <opencv2/opencv.hpp>
 #include <opencv2/calib3d/calib3d.hpp>
 #include <cv_bridge/cv_bridge.h>
 
@@ -66,7 +68,7 @@ private:
     image_transport::CameraPublisher pub_rect_left_;
     image_transport::CameraPublisher pub_rect_right_;
 
-    image_transport::Publisher pub_disparity_raw_;
+    image_transport::CameraPublisher pub_disparity_raw_;
 
     //
     sensor_msgs::CameraInfo mCameraInfoLeft_;
