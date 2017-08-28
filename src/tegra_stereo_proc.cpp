@@ -68,6 +68,7 @@ void TegraStereoProc::onInit()
     pub_rect_left_ = imageTransport_->advertiseCamera ("left/image_rect", 1);
     pub_rect_right_ = imageTransport_->advertiseCamera("right/image_rect", 1);
     pub_disparity_raw_ = imageTransport_->advertiseCamera("disparity_raw/image_raw", 1);
+    pub_depth_Image_ = imageTransport_->advertiseCamera("depth/image", 1);
     pub_disparity_ = private_nh.advertise<stereo_msgs::DisparityImage> ("disparity", 1);
     pub_points_ = private_nh.advertise<sensor_msgs::PointCloud> ("points", 1);
     pub_points2_ = private_nh.advertise<sensor_msgs::PointCloud2> ("points2", 1);
@@ -170,7 +171,9 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
           pub_disparity_raw_.getNumSubscribers()>0 ||
           pub_disparity_.getNumSubscribers() >0 ||
           pub_points_.getNumSubscribers() > 0 ||
-          pub_points2_.getNumSubscribers() >0)
+          pub_points2_.getNumSubscribers() >0 ||
+          pub_depth_Image_.getNumSubscribers() > 0
+          )
   {
 
     float elapsed_time_ms;
@@ -207,6 +210,13 @@ bool TegraStereoProc::processRectified(const cv::Mat &left_rect_cv, const cv::Ma
     if(pub_disparity_.getNumSubscribers()>0)
     {
         pub_disparity_.publish (disparity_msgPtr);
+    }
+
+    if(pub_depth_Image_.getNumSubscribers() >0)
+    {
+        sensor_msgs::ImagePtr imgPtr = processDepthImage(disparity_msgPtr);
+        mCameraInfoLeft_.header = imgPtr->header;
+        pub_depth_Image_.publish (imgPtr, boost::make_shared<sensor_msgs::CameraInfo>(mCameraInfoLeft_));
     }
 
     // Project disparity image to 3d point cloud
@@ -246,7 +256,7 @@ void TegraStereoProc::processDisparity (const cv::Mat &disparity, const std_msgs
     }
 
     auto &dimage = disparityMsgPtr->image;
-    dimage.height = left_model_.cameraInfo().height; // TODO hack
+    dimage.height = left_model_.cameraInfo().height;
     dimage.width = left_model_.cameraInfo().width;
     dimage.encoding = sensor_msgs::image_encodings::TYPE_32FC1;
     dimage.step = dimage.width * sizeof (float);
@@ -472,6 +482,42 @@ void TegraStereoProc::processPoints2(const stereo_msgs::DisparityImageConstPtr& 
   else {
     ROS_WARN("Could not fill color channel of the point cloud, unrecognized encoding '%s'", encoding.c_str());
   }
+}
+
+
+sensor_msgs::ImagePtr TegraStereoProc::processDepthImage(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt) const
+{
+    // Calculate dense point cloud
+    const sensor_msgs::Image& dimage = disparityMsgPrt->image;
+    const cv::Mat_<float> dmat(dimage.height, dimage.width, (float*)&dimage.data[0], dimage.step);
+    stereo_model_.projectDisparityImageTo3d(dmat, dense_points_, true);
+
+
+    cv::Mat_<float> cvDepthImage(dense_points_.rows, dense_points_.cols);
+
+    float bad_point = std::numeric_limits<float>::quiet_NaN ();
+    //copy the Z value to depth matrix
+    for (int32_t u = 0; u < dense_points_.rows; ++u)
+    {
+        for (int32_t v = 0; v < dense_points_.cols; ++v)
+        {
+            if (isValidPoint(dense_points_(u,v)))
+            {
+                cvDepthImage(u,v) = dense_points_(u,v)[2];
+            }
+            else
+            {
+                cvDepthImage(u,v) = bad_point;
+            }
+        }
+    }
+    sensor_msgs::ImagePtr depthImagePtr = cv_bridge::CvImage (disparityMsgPrt->header, sensor_msgs::image_encodings::TYPE_32FC1, cvDepthImage).toImageMsg();
+    if(out_left_frame_id.length() > 0)
+    {
+        depthImagePtr->header.frame_id = out_left_frame_id;
+    }
+
+    return depthImagePtr;
 }
 
 }  // namespace

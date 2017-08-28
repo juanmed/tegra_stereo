@@ -69,6 +69,7 @@ private:
     image_transport::CameraPublisher pub_rect_right_;
 
     image_transport::CameraPublisher pub_disparity_raw_;
+    image_transport::CameraPublisher pub_depth_Image_;
 
     //
     sensor_msgs::CameraInfo mCameraInfoLeft_;
@@ -112,6 +113,7 @@ private:
     void processPoints2(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt,
                                          const cv::Mat& color, const std::string& encoding,
                                          sensor_msgs::PointCloud2Ptr &points) const;
+    sensor_msgs::ImagePtr processDepthImage(const stereo_msgs::DisparityImageConstPtr& disparityMsgPrt) const;
 };
 
 }  // namespace
